@@ -1,0 +1,632 @@
+from PyQt5.QtWidgets import *
+from PyQt5.QtGui import *
+from PyQt5.QtCore import *
+from moviepy.editor import *
+from moviepy.video.tools.subtitles import SubtitlesClip
+import srt
+import os
+import random
+import re
+import sys
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("视频合成工具")
+        self.resize(800, 600)
+        self.initUI()
+        self.initData()
+
+    def initUI(self):
+        # 创建一个中心部件，用来放置其他元素
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+
+        # 创建一个水平布局，用来分割左右两部分
+        self.h_layout = QHBoxLayout()
+        self.central_widget.setLayout(self.h_layout)
+
+        # 创建一个左侧部件，用来显示导入的文件信息
+        self.left_widget = QWidget()
+        self.left_widget.setMinimumWidth(300)
+        self.h_layout.addWidget(self.left_widget)
+
+        # 创建一个垂直布局，用来放置左侧部件的元素
+        self.v_layout = QVBoxLayout()
+        self.left_widget.setLayout(self.v_layout)
+
+        # 创建一个标签，用来显示“导入文件”
+        self.import_label = QLabel("导入文件")
+        self.import_label.setAlignment(Qt.AlignCenter)
+        self.v_layout.addWidget(self.import_label)
+
+        # 创建一个表格，用来显示导入文件的名称、类型、时长等信息
+        self.table = QTableWidget()
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(["名称", "类型", "时长", "操作"])
+        # 设置表格的水平表头的拉伸模式为可交互
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.v_layout.addWidget(self.table)
+
+        # 创建一个按钮，用来选择图片文件
+        self.select_image_button = QPushButton("选择图片")
+        self.select_image_button.clicked.connect(self.select_image)
+        self.v_layout.addWidget(self.select_image_button)
+
+        # 创建一个按钮，用来去除选择的图片文件
+        self.remove_image_button = QPushButton("去除图片")
+        self.remove_image_button.clicked.connect(self.remove_image)
+        self.v_layout.addWidget(self.remove_image_button)
+
+        # 创建一个按钮，用来选择背景音频文件
+        self.select_bg_audio_button = QPushButton("选择背景音频")
+        self.select_bg_audio_button.clicked.connect(self.select_bg_audio)
+        self.v_layout.addWidget(self.select_bg_audio_button)
+
+        # 创建一个按钮，用来选择字幕音频文件
+        self.select_sub_audio_button = QPushButton("选择字幕音频")
+        self.select_sub_audio_button.clicked.connect(self.select_bg_audio)
+        self.v_layout.addWidget(self.select_sub_audio_button)
+
+        # 创建一个按钮，用来选择字幕文件
+        self.select_sub_button = QPushButton("选择字幕")
+        self.select_sub_button.clicked.connect(self.select_sub)
+        self.v_layout.addWidget(self.select_sub_button)
+
+        # 创建一个右侧部件，用来显示视频合成的选项
+        self.right_widget = QWidget()
+        self.h_layout.addWidget(self.right_widget)
+
+        # 创建一个垂直布局，用来放置右侧部件的元素
+        self.rv_layout = QVBoxLayout()
+        self.right_widget.setLayout(self.rv_layout)
+
+        # 创建一个标签，用来显示“视频合成选项”
+        self.option_label = QLabel("视频合成选项")
+        self.option_label.setAlignment(Qt.AlignCenter)
+        self.rv_layout.addWidget(self.option_label)
+
+        # 创建一个水平布局，用来放置视频时长的标签和输入框
+        self.duration_layout = QHBoxLayout()
+        self.rv_layout.addLayout(self.duration_layout)
+
+        # 创建一个标签，用来显示“视频时长”
+        self.duration_label = QLabel("视频时长（秒）")
+        self.duration_layout.addWidget(self.duration_label)
+
+        # 创建一个输入框，用来输入视频时长
+        self.duration_edit = QLineEdit()
+        self.duration_edit.setValidator(QDoubleValidator(0, 9999, 2))
+        self.duration_layout.addWidget(self.duration_edit)
+
+        # 创建一个水平布局，用来放置随机合成的复选框和输入框
+        self.random_layout = QHBoxLayout()
+        self.rv_layout.addLayout(self.random_layout)
+
+        # 创建一个复选框，用来选择是否随机合成
+        self.random_check = QCheckBox("随机合成")
+        self.random_check.stateChanged.connect(self.random_changed)
+        self.random_layout.addWidget(self.random_check)
+
+        # 创建一个输入框，用来输入随机值
+        self.random_edit = QLineEdit()
+        self.random_edit.setValidator(QDoubleValidator(0, 1, 2))
+        self.random_edit.setEnabled(False)
+        self.random_layout.addWidget(self.random_edit)
+
+        # 创建一个水平布局，用来放置字幕音频开始时间的标签和输入框
+        self.sub_audio_time_layout = QHBoxLayout()
+        self.rv_layout.addLayout(self.sub_audio_time_layout)
+
+        # 创建一个标签，用来显示“字幕音频开始时间”
+        self.sub_audio_time_label = QLabel("字幕音频开始时间（秒）")
+        self.sub_audio_time_layout.addWidget(self.sub_audio_time_label)
+
+        # 创建一个输入框，用来输入字幕音频开始时间
+        self.sub_audio_time_edit = QLineEdit()
+        self.sub_audio_time_edit.setValidator(QDoubleValidator(0, 9999, 2))
+        self.sub_audio_time_layout.addWidget(self.sub_audio_time_edit)
+
+        # 创建一个水平布局，用来放置图片过渡方式的标签和下拉列表
+        self.transition_layout = QHBoxLayout()
+        self.rv_layout.addLayout(self.transition_layout)
+
+        # 创建一个标签，用来显示“图片过渡方式”
+        self.transition_label = QLabel("图片过渡方式")
+        self.transition_layout.addWidget(self.transition_label)
+
+        # 创建一个下拉列表，用来选择图片过渡方式
+        self.transition_combo = QComboBox()
+        self.transition_combo.addItems(["无","fadein", "fadeout", "crossfade", "slide", "loop", "random"])
+        self.transition_layout.addWidget(self.transition_combo)
+
+        # 创建一个水平布局，用来放置图片显示方式的标签和下拉列表
+        self.display_layout = QHBoxLayout()
+        self.rv_layout.addLayout(self.display_layout)
+
+        # 创建一个标签，用来显示“图片显示方式”
+        self.display_label = QLabel("图片显示方式")
+        self.display_layout.addWidget(self.display_label)
+
+        # 创建一个下拉列表，用来选择图片显示方式
+        self.display_combo = QComboBox()
+        self.display_combo.addItems(["居中", "平铺", "缩放", "拉伸"])
+        self.display_combo.currentTextChanged.connect(self.display_changed)
+        self.display_layout.addWidget(self.display_combo)
+
+        # 创建一个水平布局，用来放置分辨率的标签和输入框
+        self.resolution_layout = QHBoxLayout()
+        self.rv_layout.addLayout(self.resolution_layout)
+
+        # 创建一个标签，用来显示“分辨率”
+        self.resolution_label = QLabel("分辨率（宽x高）")
+        self.resolution_layout.addWidget(self.resolution_label)
+
+        # 创建一个输入框，用来输入分辨率
+        self.resolution_edit = QLineEdit()
+        reg_exp = QRegExp("\d+x\d+")
+        validator = QRegExpValidator(reg_exp)
+        self.resolution_edit.setValidator(validator)
+        self.resolution_edit.setEnabled(False)
+        self.resolution_layout.addWidget(self.resolution_edit)
+
+        # 创建一个水平布局，用来放置填充颜色的标签和颜色选择器
+        self.color_layout = QHBoxLayout()
+        self.rv_layout.addLayout(self.color_layout)
+
+        # 创建一个标签，用来显示“填充颜色”
+        self.color_label = QLabel("填充颜色")
+        self.color_layout.addWidget(self.color_label)
+
+        # 创建一个颜色选择器，用来选择填充颜色
+        self.color_button = QPushButton()
+        self.color_button.setStyleSheet("background-color: white")
+        self.color_button.clicked.connect(self.select_color)
+        self.color_button.setEnabled(False)
+        self.color_layout.addWidget(self.color_button)
+
+        # 创建一个水平布局，用来放置视频底色的标签和颜色选择器
+        self.bg_color_layout = QHBoxLayout()
+        self.rv_layout.addLayout(self.bg_color_layout)
+
+        # 创建一个标签，用来显示“视频底色”
+        self.bg_color_label = QLabel("视频底色")
+        self.bg_color_layout.addWidget(self.bg_color_label)
+
+        # 创建一个颜色选择器，用来选择视频底色
+        self.bg_color_button = QPushButton()
+        self.bg_color_button.setStyleSheet("background-color: black")
+        self.bg_color_button.clicked.connect(self.select_bg_color)
+        self.bg_color_layout.addWidget(self.bg_color_button)
+
+        # 创建一个按钮，用来开始合成视频
+        self.start_button = QPushButton("开始合成")
+        self.start_button.clicked.connect(self.start_compose)
+        self.rv_layout.addWidget(self.start_button)
+
+    def initData(self):
+        # 初始化一个空的文件列表，用来存储导入的文件信息
+        self.file_list = []
+
+        # 初始化一个默认的视频时长为0
+        self.duration = 0
+
+        # 初始化一个默认的随机值为0.5
+        self.random_value = 0.5
+
+        # 初始化一个默认的字幕音频开始时间为0
+        self.sub_audio_time = 0
+
+        # 初始化一个默认的图片过渡方式为"无"
+        self.transition = "无"
+
+        # 初始化一个默认的图片显示方式为"居中"
+        self.display = "居中"
+
+        # 初始化一个默认的分辨率为"800x600"
+        self.resolution = "800x600"
+
+        # 初始化一个默认的填充颜色为白色
+        self.color = QColor("white")
+
+        # 初始化一个默认的视频底色为黑色
+        self.bg_color = QColor("black")
+
+    def select_image(self):
+        # 弹出一个文件对话框，用来选择图片文件
+        file_names, _ = QFileDialog.getOpenFileNames(self, "选择图片", "", "图片文件 (*.jpg *.png *.gif)")
+        if file_names:
+            # 遍历每个文件名
+            for file_name in file_names:
+                # 获取文件的基本信息，比如名称、类型、时长等
+                name = os.path.basename(file_name)
+                type = "图片"
+                # 给每个图片文件一个默认的时长，比如1秒
+                duration = 1
+                # 创建一个字典，用来存储文件信息
+                file_info = {"name": name, "type": type, "duration": duration, "file_name": file_name}
+                # 将文件信息添加到文件列表中
+                self.file_list.append(file_info)
+                # 在表格中显示文件信息
+                self.show_file_info(file_info)
+
+    def select_bg_audio(self):
+        # 弹出一个文件对话框，用来选择背景音频文件
+        file_name, _ = QFileDialog.getOpenFileName(self, "选择背景音频", "", "音频文件 (*.wav *.mp3)")
+        if file_name:
+            # 获取文件的基本信息，比如名称、类型、时长等
+            name = os.path.basename(file_name)
+            type = "背景音频"
+            clip = AudioFileClip(file_name)
+            duration = clip.duration
+            # 创建一个字典，用来存储文件信息
+            file_info = {"name": name, "type": type, "duration": duration, "file_name": file_name}
+            # 将文件信息添加到文件列表中
+            self.file_list.append(file_info)
+            # 在表格中显示文件信息
+            self.show_file_info(file_info)
+
+    def select_sub_audio(self):
+        # 弹出一个文件对话框，用来选择字幕音频文件
+        file_name, _ = QFileDialog.getOpenFileName(self, "选择字幕音频", "", "音频文件 (*.wav *.mp3)")
+        if file_name:
+            # 获取文件的基本信息，比如名称、类型、时长等
+            name = os.path.basename(file_name)
+            type = "字幕音频"
+            clip = AudioFileClip(file_name)
+            duration = clip.duration
+            # 创建一个字典，用来存储文件信息
+            file_info = {"name": name, "type": type, "duration": duration, "file_name": file_name}
+            # 将文件信息添加到文件列表中
+            self.file_list.append(file_info)
+            # 在表格中显示文件信息
+            self.show_file_info(file_info)
+
+    def select_sub(self):
+        # 弹出一个文件对话框，用来选择字幕文件
+        file_name, _ = QFileDialog.getOpenFileName(self, "选择字幕", "", "字幕文件 (*.srt)")
+        if file_name:
+            # 获取文件的基本信息，比如名称、类型、时长等
+            name = os.path.basename(file_name)
+            type = "字幕"
+            with open(file_name, encoding="utf-8") as f:
+                content = f.read()
+                subs = list(srt.parse(content))
+                start_time = subs[0].start.total_seconds()
+                end_time = subs[-1].end.total_seconds()
+                duration = end_time - start_time
+            # 创建一个字典，用来存储文件信息
+            file_info = {"name": name, "type": type, "duration": duration, "file_name": file_name}
+            # 将文件信息添加到文件列表中
+            self.file_list.append(file_info)
+            # 在表格中显示文件信息
+            self.show_file_info(file_info)
+
+    def show_file_info(self, file_info):
+        # 在表格中显示一行文件信息
+        row_count = self.table.rowCount()
+        self.table.setRowCount(row_count + 1)
+        name_item = QTableWidgetItem(file_info["name"])
+        type_item = QTableWidgetItem(file_info["type"])
+        duration_item = QTableWidgetItem(str(round(file_info["duration"], 2)))
+        preview_button = QPushButton("预览")
+        preview_button.clicked.connect(lambda: self.preview_file(file_info))
+        delete_button = QPushButton("删除")
+        delete_button.clicked.connect(lambda: self.delete_file(file_info))
+        self.table.setItem(row_count, 0, name_item)
+        self.table.setItem(row_count, 1, type_item)
+        self.table.setItem(row_count, 2, duration_item)
+        self.table.setCellWidget(row_count, 3, preview_button)
+        self.table.setCellWidget(row_count, 4, delete_button)
+
+    # def preview_file(self, file_info):
+    #     # 弹出一个新窗口，用来预览文件内容
+    #     preview_window = PreviewWindow(file_info)
+    #     preview_window.show()
+    def remove_image(self):
+        # 获取所有选择的行
+        rows = self.table.selectionModel().selectedRows()
+        if rows:
+            # 将选择的行按照索引排序
+            rows.sort(key=lambda x: x.row())
+            # 从后往前遍历每个选择的行
+            for row in reversed(rows):
+                # 获取当前选择的文件信息
+                file_info = self.file_list[row.row()]
+                if file_info["type"] == "图片":
+                    # 如果文件类型是图片，从文件列表中移除文件信息，并在表格中删除一行
+                    self.file_list.remove(file_info)
+                    self.table.removeRow(row.row())
+
+    def preview_file(self, file_info):
+        # 弹出一个新窗口，用来预览文件内容
+        # 传入主窗口作为父窗口
+        preview_window = PreviewWindow(file_info, self)
+        preview_window.show()
+
+    def delete_file(self, file_info):
+        # 从文件列表中移除文件信息，并在表格中删除一行
+        self.file_list.remove(file_info)
+        row = self.table.currentRow()
+        self.table.removeRow(row)
+
+    def random_changed(self):
+        # 根据复选框的状态，启用或禁用随机值输入框
+        if self.random_check.isChecked():
+            self.random_edit.setEnabled(True)
+        else:
+            self.random_edit.setEnabled(False)
+
+    def display_changed(self):
+        # 根据下拉列表的选择，启用或禁用分辨率输入框和颜色选择器
+        if self.display_combo.currentText() == "拉伸":
+            self.resolution_edit.setEnabled(True)
+            self.color_button.setEnabled(False)
+        elif self.display_combo.currentText() == "缩放":
+            self.resolution_edit.setEnabled(True)
+            self.color_button.setEnabled(True)
+        else:
+            self.resolution_edit.setEnabled(False)
+            self.color_button.setEnabled(True)
+
+    def select_color(self):
+        # 弹出一个颜色对话框，用来选择填充颜色，并设置颜色选择器的样式
+        color = QColorDialog.getColor()
+        if color.isValid():
+            self.color = color
+            self.color_button.setStyleSheet("background-color: {}".format(color.name()))
+
+    def select_bg_color(self):
+        # 弹出一个颜色对话框，用来选择视频底色，并设置颜色选择器的样式
+        color = QColorDialog.getColor()
+        if color.isValid():
+            self.bg_color = color
+            self.bg_color_button.setStyleSheet("background-color: {}".format(color.name()))
+
+    # def start_compose(self):
+    #     # 检查文件列表是否为空，如果为空，弹出一个警告对话框
+    #     if not self.file_list:
+    #         QMessageBox.warning(self, "警告", "请至少导入一个文件")
+    #         return
+
+    def start_compose(self):
+        # 检查文件列表是否为空，如果为空，弹出一个警告对话框
+        if not self.file_list:
+            QMessageBox.warning(self, "警告", "请至少导入一个文件")
+            return
+
+        # 调用合成视频的函数，得到一个视频对象
+        video = self.compose_video()
+
+        # 调用保存视频的函数，将视频对象写入到文件中
+        self.save_video(video)
+
+class PreviewWindow(QDialog):
+    def __init__(self, file_info, parent=None):
+        super().__init__(parent)
+        self.file_info = file_info
+        self.setWindowTitle("预览 {}".format(file_info["name"]))
+        self.resize(800, 600)
+        self.show_content()
+
+    def show_content(self):
+        # 根据文件类型，显示不同的内容
+        if self.file_info["type"] == "图片":
+            # 显示图片
+            label = QLabel()
+            pixmap = QPixmap(self.file_info["file_name"])
+            label.setPixmap(pixmap)
+            label.setScaledContents(True)
+            layout = QVBoxLayout()
+            layout.addWidget(label)
+            self.setLayout(layout)
+        elif self.file_info["type"] == "背景音频" or self.file_info["type"] == "字幕音频":
+            # 播放音频
+            player = QMediaPlayer()
+            playlist = QMediaPlaylist()
+            playlist.addMedia(QMediaContent(QUrl.fromLocalFile(self.file_info["file_name"])))
+            player.setPlaylist(playlist)
+            player.play()
+            slider = QSlider(Qt.Horizontal)
+            slider.setRange(0, player.duration() / 1000)
+            slider.sliderMoved.connect(lambda: player.setPosition(slider.value() * 1000))
+            player.positionChanged.connect(lambda: slider.setValue(player.position() / 1000))
+            layout = QVBoxLayout()
+            layout.addWidget(slider)
+            self.setLayout(layout)
+        elif self.file_info["type"] == "字幕":
+            # 显示字幕
+            text_edit = QTextEdit()
+            text_edit.setReadOnly(True)
+            with open(self.file_info["file_name"], encoding="utf-8") as f:
+                content = f.read()
+                text_edit.setText(content)
+            layout = QVBoxLayout()
+            layout.addWidget(text_edit)
+            self.setLayout(layout)
+
+    def compose_video(self):
+        # 获取视频时长，如果输入框为空或不合法，弹出一个警告对话框
+        try:
+            self.duration = float(self.duration_edit.text())
+            if self.duration <= 0:
+                raise ValueError
+        except ValueError:
+            QMessageBox.warning(self, "警告", "请输入一个正数作为视频时长")
+            return
+
+        # 获取随机值，如果复选框被选中，且输入框为空或不合法，弹出一个警告对话框
+        if self.random_check.isChecked():
+            try:
+                self.random_value = float(self.random_edit.text())
+                if not 0 < self.random_value < 1:
+                    raise ValueError
+            except ValueError:
+                QMessageBox.warning(self, "警告", "请输入一个0到1之间的小数作为随机值")
+                return
+
+        # 获取字幕音频开始时间，如果输入框为空或不合法，弹出一个警告对话框
+        try:
+            self.sub_audio_time = float(self.sub_audio_time_edit.text())
+            if self.sub_audio_time < 0:
+                raise ValueError
+        except ValueError:
+            QMessageBox.warning(self, "警告", "请输入一个非负数作为字幕音频开始时间")
+            return
+
+        # 获取图片过渡方式
+        self.transition = self.transition_combo.currentText()
+
+        # 获取图片显示方式
+        self.display = self.display_combo.currentText()
+
+        # 获取分辨率，如果输入框为空或不合法，弹出一个警告对话框
+        if self.display in ["缩放", "拉伸"]:
+            try:
+                self.resolution = self.resolution_edit.text()
+                width, height = map(int, self.resolution.split("x"))
+                if width <= 0 or height <= 0:
+                    raise ValueError
+            except ValueError:
+                QMessageBox.warning(self, "警告", "请输入一个合法的分辨率（宽x高）")
+                return
+
+        # 获取填充颜色和视频底色
+        self.color = self.color_button.palette().color(QPalette.Button)
+        self.bg_color = self.bg_color_button.palette().color(QPalette.Button)
+
+        # 创建一个空的视频对象
+        video = None
+
+        # 遍历文件列表，根据文件类型，处理不同的文件
+        for file_info in self.file_list:
+            if file_info["type"] == "图片":
+                # 处理图片文件
+                clip = ImageClip(file_info["file_name"])
+                clip = clip.set_duration(file_info["duration"])
+                clip = self.adjust_clip(clip)
+                video = self.append_clip(video, clip)
+            elif file_info["type"] == "背景音频":
+                # 处理背景音频文件
+                audio_clip = AudioFileClip(file_info["file_name"])
+                audio_clip = audio_clip.set_duration(self.duration)
+                video = video.set_audio(audio_clip)
+            elif file_info["type"] == "字幕音频":
+                # 处理字幕音频文件
+                sub_audio_clip = AudioFileClip(file_info["file_name"])
+                sub_audio_clip = sub_audio_clip.set_start(self.sub_audio_time)
+                sub_audio_clip = sub_audio_clip.set_end(self.duration)
+                video = video.set_audio(video.audio.set_start(0).overlay(sub_audio_clip))
+            elif file_info["type"] == "字幕":
+                # 处理字幕文件
+                with open(file_info["file_name"], encoding="utf-8") as f:
+                    content = f.read()
+                    subs = list(srt.parse(content))
+                    generator = lambda txt: TextClip(txt, font="SimHei", fontsize=24, color="white")
+                    sub_clip = SubtitlesClip(subs, generator)
+                    sub_clip = sub_clip.set_start(self.sub_audio_time)
+                    sub_clip = sub_clip.set_end(self.duration)
+                    video = video.set_subclip(video.subclip.set_start(0).overlay(sub_clip))
+
+        # 返回视频对象
+        return video
+
+    def adjust_clip(self, clip):
+        # 根据图片显示方式，调整图片的显示效果
+        if self.display == "居中":
+            # 居中显示
+            clip = clip.on_color(size=(self.width, self.height), color=self.color)
+        elif self.display == "平铺":
+            # 平铺显示
+            clip = clip.resize(height=self.height)
+            clip = clip.fx(vfx.loop, n=self.width // clip.w + 1)
+            clip = clip.crop(x_center=clip.w / 2, width=self.width)
+        elif self.display == "缩放":
+            # 缩放显示
+            clip = clip.resize(newsize=(self.width, self.height))
+            clip = clip.on_color(size=(self.width, self.height), color=self.color, pos="center")
+        elif self.display == "拉伸":
+            # 拉伸显示
+            clip = clip.resize(newsize=(self.width, self.height))
+        return clip
+
+    def add_transition(self, video, clip):
+        # 根据图片过渡方式，添加图片的过渡效果
+        if self.transition == "fadein":
+            # 淡入效果
+            video = video.crossfadein(clip, 1)
+        elif self.transition == "fadeout":
+            # 淡出效果
+            video = video.crossfadeout(clip, 1)
+        elif self.transition == "crossfade":
+            # 交叉淡入淡出效果
+            video = video.crossfade(clip, 1)
+        elif self.transition == "slide":
+            # 滑动效果
+            video = video.slide(clip, 1)
+        elif self.transition == "loop":
+            # 循环效果
+            video = video.loop(clip, 1)
+        elif self.transition == "random":
+            # 随机效果
+            transitions = ["fadein", "fadeout", "crossfade", "slide", "loop"]
+            random_transition = random.choice(transitions)
+            video = self.add_transition(video, clip, random_transition)
+        elif self.transition == "无":
+            # 无效果
+            video = concatenate_videoclips([video, clip])
+        return video
+
+    def append_clip(self, video, clip):
+        # 根据是否随机合成，拼接视频片段
+        if self.random_check.isChecked():
+            # 随机合成
+            clip_duration = clip.duration * self.random_value
+            clip = clip.set_duration(clip_duration)
+        if video is None:
+            # 如果视频为空，直接赋值为片段
+            video = clip
+        else:
+            # 如果视频不为空，添加过渡效果并拼接片段
+            video = self.add_transition(video, clip)
+        return video
+
+    def save_video(self, video):
+        # 弹出一个文件对话框，用来选择保存视频的路径和名称
+        file_name, _ = QFileDialog.getSaveFileName(self, "保存视频", "", "视频文件 (*.mp4)")
+        if file_name:
+            # 创建一个进度条对话框，用来显示视频保存的进度
+            progress_dialog = QProgressDialog("正在保存视频...", "取消", 0, 100, self)
+            progress_dialog.setWindowTitle("保存视频")
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.forceShow()
+
+            # 定义一个回调函数，用来更新进度条的值
+            def progress_callback(value):
+                progress_dialog.setValue(value)
+
+            # 将视频对象写入到文件中，并传入回调函数
+            video.write_videofile(file_name, fps=24, codec="libx264", audio_codec="aac", progress_bar=False,
+                                  logger=None, verbose=False, progress_callback=progress_callback)
+
+            # 关闭进度条对话框
+            progress_dialog.close()
+
+            # 弹出一个信息对话框，用来显示视频保存成功
+            QMessageBox.information(self, "信息", "视频保存成功")
+
+
+
+if __name__ == "__main__":
+    # 创建一个QApplication对象
+    app = QApplication(sys.argv)
+    # 创建一个MainWindow对象
+    window = MainWindow()
+    # 显示窗口
+    window.show()
+    # 进入事件循环
+    sys.exit(app.exec_())
